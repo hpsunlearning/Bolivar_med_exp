@@ -1,0 +1,157 @@
+---
+title: "subject summary"
+author: "HS"
+date: "9/13/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## library   
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+```
+
+## load and process data
+```{r}
+Mapping_temp = read.table("Mapping_Bolivar_Villagers-20200416-jw.txt",sep = "\t",header = T, stringsAsFactors = F)
+
+Mapping_temp$unique_subject_id = paste(Mapping_temp$Year,
+                                           Mapping_temp$Village,
+                                           Mapping_temp$House_ID,
+                                           Mapping_temp$Family_ID,
+                                           Mapping_temp$Subject_ID,
+                                           sep = ".")
+
+Mapping_villagers = Mapping_temp %>% select(-c("SampleID","BarcodeSequence", 
+                                                 "LinkerPrimerSequence", "Barcode_location", 
+                                                 "SequencingRUN", "Tube_ID", 
+                                                 "Body_Site", "Body_Site_Type", 
+                                                 "Coordinates", "Date"))
+
+Mapping_villagers = Mapping_villagers[!duplicated(Mapping_villagers),]
+#names(which(table(Mapping_subject$unique_subject_id) > 1))
+#two subject have inconsistent metadata,"2015.Mosenahanha.2015_1.2015_1.2015_1" and "2016.Kanarakuni.2016_32.2016_2.2016_8"
+#as manually checked 
+#one of "2015.Mosenahanha.2015_1.2015_1.2015_1" missing "Diet_24h", delete this duplication   
+#"2016.Kanarakuni.2016_32.2016_2.2016_8" have differnt "Birth_date" from 7/15/1979 - 7/25/1979, will use 7/15/1979 one
+#there is a unique_subject_id "NA.NA.NA.NA.NA" also not needed
+rm_1 = which(Mapping_villagers$unique_subject_id=="2015.Mosenahanha.2015_1.2015_1.2015_1" & is.na(Mapping_villagers$Diet_24h))
+rm_2 = which(Mapping_villagers$unique_subject_id=="2016.Kanarakuni.2016_32.2016_2.2016_8" & Mapping_villagers$Birth_date!="7/15/1979")
+rm_3 = which(Mapping_villagers$unique_subject_id=="NA.NA.NA.NA.NA")
+rm(rm_1,rm_2,rm_3)
+
+Mapping_villagers = Mapping_villagers %>% 
+  mutate(Expo = ifelse(Ethnicity=="SANEMA", "Low", ifelse(Village=="Fiyakwanha", "Low", ifelse(SampleGroup=="Visitors", "High", "Medium"))) %>% factor(levels = c("Low", "Medium", "High")),
+         Age_num = as.numeric(Age), 
+         Age_num = ifelse(is.na(Age_num), as.numeric(gsub(pattern = "_months", replacement = "", Age, ignore.case = T))/12, Age_num), 
+         Age_grp1 = ifelse(Age_num>=18, "Adults", "Children"), 
+         Age_grp2 = case_when(Age_num<=3 ~ "Age 0-3", 
+                              Age_num<=8 ~ "Age 3-8",
+                              Age_num<18 ~ "Age 8-18", 
+                              Age_num>=18 ~ "Adults")) %>%
+  mutate(Age_grp2 = factor(Age_grp2, levels =c("Age 0-3","Age 3-8","Age 8-18","Adults")),
+         Age_grp1 = factor(Age_grp1, levels =c("Children","Adults")))
+
+Mapping_sample = readRDS("../../data/Mapping_MS_Expo.Rds")
+Mapping_sample$unique_subject_id = paste(Mapping_sample$Year,
+                                           Mapping_sample$Village,
+                                           Mapping_sample$House_ID,
+                                           Mapping_sample$Family_ID,
+                                           Mapping_sample$Subject_ID,
+                                           sep = ".")
+
+#there is some subjects in villager data but not in the final sample mapping, need to exclude.
+#table(Mapping_subject$Expo, Mapping_subject$Village)
+Mapping_villagers = Mapping_villagers %>% filter(unique_subject_id %in% Mapping_sample$unique_subject_id)
+#table(Mapping_subject$Expo, Mapping_subject$Village)
+save(Mapping_villagers, file = "Mapping_villagers.rData")
+```
+
+## subject summary
+```{r}
+#remove two newborn baby  
+dat = Mapping_villagers %>% mutate(Expo = droplevels(Expo)) %>% filter(!is.na(Age_num))
+
+#proportion data: age_grp2, gender, villiage
+tb = table(dat$Age_grp1, dat$Expo, dat$Year, dat$Gender)
+res1 = ftable(tb, row.vars = 1, col.vars = c(3,2,4))
+tb = table(dat$Village, dat$Expo, dat$Year, dat$Gender)
+res2 = ftable(tb, row.vars = 1, col.vars = c(3,2, 4))
+res = rbind(as.matrix(res1), as.matrix(res2))
+write.csv(res, file = "subject_sum_1.csv")
+
+#numeric data: Weight, Height, BMI, Glucose, Cholesterol, Uric_acid, Hemoglobin, BP
+my_summarize = function(x){
+  data.frame(
+             N = n(),
+             N.nna = sum(!is.na(x)),
+             Min = min(x,na.rm = T),
+             Med = median(x, na.rm = T),
+             Mean = mean(x, na.rm = T),
+             Max = max(x,na.rm = T),
+             SD = sd(x,na.rm = T)
+             )
+}
+
+dat_summarize = function(dat, var= NULL){
+  res = dat %>% group_by(Year, Expo, Age_grp1, Gender) %>% summarise(my_summarize(get(var))) %>% 
+    mutate(Var = var, mean_sd = str_c(round(Mean,1), " \u00b1 ", round(SD,1)), nonna_prop = str_c("(", N.nna,"/",N,")")) %>%
+    select(Var, Year, Expo, Age_grp1, Gender, mean_sd, nonna_prop) %>% 
+    pivot_wider(names_from = c(Year, Expo, Gender), 
+              values_from =c(mean_sd, nonna_prop)) %>% ungroup()
+  res
+} 
+
+res_Weight = dat_summarize(dat, var = "Weight")
+res_Height = dat_summarize(dat %>% mutate(Height = as.numeric(str_remove_all(Height, "_"))), var = "Height")
+res_BMI = dat_summarize(dat, var = "BMI")
+res_Glucose = dat_summarize(dat %>% mutate(Glucose = as.numeric(str_remove_all(Glucose, "_mg/dL"))), var = "Glucose")
+res_Cholesterol = dat_summarize(dat %>% mutate(Cholesterol = as.numeric(str_remove_all(Cholesterol, "_mg/dL"))), var = "Cholesterol")
+res_Hemoglobin = dat_summarize(dat %>% mutate(Hemoglobin = as.numeric(str_remove_all(Hemoglobin, "_g/dL"))), var = "Hemoglobin")
+dat$Systolic = round(rowMeans(dat[,c("Systolic_1","Systolic_2","Systolic_3")]))
+dat$Diastolic = round(rowMeans(dat[,c("Diastolic_1","Diastolic_2","Diatolic_3")]))
+res_Systolic = dat_summarize(dat, var = "Systolic")
+res_Diastolic = dat_summarize(dat, var = "Diastolic")
+
+res = rbind(res_Weight, res_Height, res_BMI, res_Glucose, res_Cholesterol, res_Hemoglobin, res_Systolic, res_Diastolic)
+write.csv(res, file = "subject_sum_2.csv")
+
+#parasites
+pdat = dat %>% select(Year, Expo, Village, Onchocerca:Strongyloides_stercolaris_Larvas)
+pdat2 = pdat %>% mutate(across(Onchocerca:Strongyloides_stercolaris_Larvas, function(x){ifelse(x=="Yes",1,0)})) %>% 
+  group_by(Year, Expo) %>%
+  summarise(across(Onchocerca:Strongyloides_stercolaris_Larvas, 
+                   .fns = list(N_test = ~sum(!is.na(.x)), N_pos = ~sum(.x, na.rm = T)), 
+                   .names = "{.col}.{.fn}")) %>% 
+  pivot_longer(cols = Onchocerca.N_test:Strongyloides_stercolaris_Larvas.N_pos, 
+                       names_to = c("Parasite", ".value"), names_pattern = "(.*)\\.(.*)") %>% ungroup()
+
+res_parasite = data.frame(Year=NA, Parasite=NA, Medium=NA, Low=NA, pvalue=NA) 
+for(yy in c(2015, 2016)){
+  for(p in names(pdat %>% select(-c(Year,Expo, Village)))){
+    res = data.frame(Year = yy, Parasite = p)
+    wdat = pdat2 %>% filter(Year == yy, Parasite == p) %>% mutate(N_neg = N_test-N_pos, 
+                                                                  percent = ifelse(N_test==0,NA,round(N_pos/N_test*100,2)),
+                                                                  N_label = str_c(N_test, " ", N_pos, " (", percent,"%)")) 
+    res$Medium = wdat %>% filter(Expo == "Medium") %>% pull(N_label) 
+    res$Low = wdat %>% filter(Expo == "Low") %>% pull(N_label)
+    res$pvalue = (wdat %>% select(N_neg, N_pos) %>% fisher.test())$p.value %>% round(digits = 4)
+    res_parasite = rbind(res_parasite,res)
+  }
+}
+res_parasite = res_parasite %>% filter(!is.na(Year))
+write.csv(res_parasite, file = "subject_sum_3.csv")
+
+```
+
+
+
+
+
+
+
+
