@@ -56,7 +56,7 @@ Mapping_villagers = Mapping_villagers %>%
   mutate(Age_grp2 = factor(Age_grp2, levels =c("Age 0-3","Age 3-8","Age 8-18","Adults")),
          Age_grp1 = factor(Age_grp1, levels =c("Children","Adults")))
 
-Mapping_sample = readRDS("../../data/Mapping_MS_Expo.Rds")
+Mapping_sample = readRDS("../../../data/Mapping_MS_Expo.Rds")
 Mapping_sample$unique_subject_id = paste(Mapping_sample$Year,
                                            Mapping_sample$Village,
                                            Mapping_sample$House_ID,

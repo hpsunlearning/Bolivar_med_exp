@@ -1,0 +1,52 @@
+---
+title: "VFA_Bolivar16"
+output:
+  html_notebook:
+    number_sections: yes
+    df_print: paged
+editor_options:
+  chunk_output_type: console
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+author: Jincheng Wang
+---
+
+**Logs**
+**DATE** The purpose of the analysis, any updates,
+
+```{r setup, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE, warning = FALSE, message = FALSE)
+# Loading library here
+library(tidyverse)
+library(extrafont)
+library(lattice)
+```
+
+## Load data
+```{r}
+VFA <- read.delim("../Bolivar-2016-VFA-Metadata-20190327-jw.txt", stringsAsFactors = F, na.strings = "NA")
+VFA_work <- VFA %>% select(c(2:8, 12, 13, 16:20, 23:25, 27:42, 45:62)) 
+VFA_work_long <- VFA_work %>% gather(key = "VFA", value = "Conc", c(2:7)) %>% filter(Conc!="NA") %>% mutate(Conc = as.numeric(Conc))
+```
+
+## VFA vs BP
+### Overview
+```{r}
+colnames(VFA_work_long)
+Work <- VFA_work_long %>% mutate(Diastolic_avg = rowMeans(select(., c(Diastolic_1, Diastolic_2, Diatolic_3)), na.rm = T), Systolic_avg = rowMeans(select(., c(Systolic_1, Systolic_2, Systolic_3)), na.rm = T), Age_grp = ifelse(as.numeric(Age)>=18, "Adults", "Children"), Urban = ifelse(Village=="Kanarakuni", "Medium", "Low"), Glucose2 = gsub(pattern = "_mg/dl", replacement = "", x = Glucose, fixed = T) %>% as.numeric)
+
+ggplot(Work, aes(x = Diastolic_avg, y = Conc, color = VFA)) +
+    geom_point() +
+    facet_grid(.~Age_grp) +
+    geom_smooth(method = "lm") +
+    xlim(c(55,85)) + theme_classic() + theme(aspect.ratio = 1) +
+    ggtitle("VFA vs DBP")
+ggplot(Work, aes(x = Systolic_avg, y = Conc, color = VFA)) +
+    geom_point() +
+    facet_grid(.~Age_grp) +
+    geom_smooth(method = "lm") +
+    theme_classic() + theme(aspect.ratio = 1) +
+    ggtitle("VFA vs SBP")
+```
+
+It appears Isovalerate and Valerate do not change with BP.
+
