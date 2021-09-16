@@ -76,6 +76,29 @@ save(Mapping_villagers, file = "Mapping_villagers.rData")
 #remove two newborn baby  
 dat = Mapping_villagers %>% mutate(Expo = droplevels(Expo)) %>% filter(!is.na(Age_num))
 
+dat = dat %>% mutate(Height = as.numeric(str_remove_all(Height, "_")),
+                     Glucose = as.numeric(str_remove_all(Glucose, "_mg/dL")),
+                     Cholesterol = as.numeric(str_remove_all(Cholesterol, "_mg/dL")),
+                     Hemoglobin = as.numeric(str_remove_all(Hemoglobin, "_g/dL")))
+dat$Systolic = round(rowMeans(dat[,c("Systolic_1","Systolic_2","Systolic_3")]))
+dat$Diastolic = round(rowMeans(dat[,c("Diastolic_1","Diastolic_2","Diatolic_3")]))
+
+#remove some incorrect data
+#incorrect weight data
+#dat %>% filter(Age_grp2=="Age 0-3") %>% pull(Weight) %>% sort()
+#dat %>% filter(Age_grp2=="Age 3-8") %>% pull(Weight) %>% sort()
+#incorrect height data
+#dat %>% filter(Age_grp1 == "Adults") %>% pull(Height) %>% sort()
+#incorrect BMI data
+#dat %>% filter(Age_grp1 == "Children") %>% pull(BMI) %>% sort()
+
+#fill them with NA
+dat[which(dat$Weight>90&dat$Age_grp2=="Age 0-3"), "Weight"] <- NA
+dat[which(dat$Weight>50&dat$Age_grp2=="Age 3-8"), "Weight"] <- NA
+dat[which(dat$Height<40&dat$Age_grp1=="Adults"), "Height"] <- NA
+dat[which(dat$BMI>90&dat$Age_grp1=="Children"), "BMI"] <- NA
+
+
 #proportion data: age_grp2, gender, villiage
 tb = table(dat$Age_grp1, dat$Expo, dat$Year, dat$Gender)
 res1 = ftable(tb, row.vars = 1, col.vars = c(3,2,4))
@@ -97,28 +120,43 @@ my_summarize = function(x){
              )
 }
 
-dat_summarize = function(dat, var= NULL){
+dat_summarize = function(dat, var){
   res = dat %>% group_by(Year, Expo, Age_grp1, Gender) %>% summarise(my_summarize(get(var))) %>% 
     mutate(Var = var, mean_sd = str_c(round(Mean,1), " \u00b1 ", round(SD,1)), nonna_prop = str_c("(", N.nna,"/",N,")")) %>%
     select(Var, Year, Expo, Age_grp1, Gender, mean_sd, nonna_prop) %>% 
     pivot_wider(names_from = c(Year, Expo, Gender), 
               values_from =c(mean_sd, nonna_prop)) %>% ungroup()
   res
-} 
+}
 
 res_Weight = dat_summarize(dat, var = "Weight")
-res_Height = dat_summarize(dat %>% mutate(Height = as.numeric(str_remove_all(Height, "_"))), var = "Height")
+res_Height = dat_summarize(dat, var = "Height")
 res_BMI = dat_summarize(dat, var = "BMI")
-res_Glucose = dat_summarize(dat %>% mutate(Glucose = as.numeric(str_remove_all(Glucose, "_mg/dL"))), var = "Glucose")
-res_Cholesterol = dat_summarize(dat %>% mutate(Cholesterol = as.numeric(str_remove_all(Cholesterol, "_mg/dL"))), var = "Cholesterol")
-res_Hemoglobin = dat_summarize(dat %>% mutate(Hemoglobin = as.numeric(str_remove_all(Hemoglobin, "_g/dL"))), var = "Hemoglobin")
-dat$Systolic = round(rowMeans(dat[,c("Systolic_1","Systolic_2","Systolic_3")]))
-dat$Diastolic = round(rowMeans(dat[,c("Diastolic_1","Diastolic_2","Diatolic_3")]))
+res_Glucose = dat_summarize(dat, var = "Glucose")
+res_Cholesterol = dat_summarize(dat, var = "Cholesterol")
+res_Hemoglobin = dat_summarize(dat, var = "Hemoglobin")
 res_Systolic = dat_summarize(dat, var = "Systolic")
 res_Diastolic = dat_summarize(dat, var = "Diastolic")
 
 res = rbind(res_Weight, res_Height, res_BMI, res_Glucose, res_Cholesterol, res_Hemoglobin, res_Systolic, res_Diastolic)
 write.csv(res, file = "subject_sum_2.csv")
+
+res_wtest = data.frame(Var=NA,Year=NA,Age=NA,Gender=NA,Pvalue=NA)
+for (v in c("Weight", "Height", "BMI", "Glucose","Cholesterol", "Hemoglobin", "Systolic","Diastolic" )){
+  for (yy in c(2015, 2016)){
+    for (a in c("Children", "Adults")){
+      for (g in c("F", "M")){
+        wdat = dat %>% filter(Year == yy, Age_grp1 == a, Gender == g)
+        res = data.frame(Var=v,Year=yy,Age=a,Gender=g,Pvalue=NA)
+        wtest = try(wilcox.test(get(v) ~ Expo, data = wdat), silent = T)
+        if(!str_detect(class(wtest), "error")){res$Pvalue = round(wtest$p.value, 4)}
+        res_wtest = rbind(res_wtest, res)
+      }
+    }
+  }
+}
+res_wtest = res_wtest %>% filter(!is.na(Var))
+write.csv(res_wtest, file = "subject_sum_2_test.csv")
 
 #parasites
 pdat = dat %>% select(Year, Expo, Village, Onchocerca:Strongyloides_stercolaris_Larvas)
@@ -148,6 +186,129 @@ write.csv(res_parasite, file = "subject_sum_3.csv")
 
 ```
 
+## body morphometry figure
+```{r}
+Expo_color <- c("#66c2a5", "#fc8d62")
+names(Expo_color) <- c("Low", "Medium")
+library(ggpubr)
+
+#Weight
+wdat = dat %>% filter(Year == 2016) %>%
+  select(Expo, Gender, Age_grp2, Age_grp1, Weight, unique_subject_id) %>% na.omit() %>%
+  mutate(Gender = ifelse(Gender == "F","Female","Male"))
+
+gdat = wdat %>% group_by(Expo, Gender, Age_grp2) %>% 
+  summarise(N = n()) %>% 
+  ungroup() %>%
+  mutate(NN = paste0("N=", N)) %>% 
+  mutate(Y = -4)
+
+g = ggplot(wdat,
+           aes(x = Age_grp2, y = Weight, color = Expo)) + 
+      geom_boxplot() + 
+      geom_point(position = position_jitterdodge(jitter.width = 0.2)) + 
+      scale_color_manual(values = Expo_color, name="Exposure") + 
+      stat_compare_means(
+                     label = "p.format",
+                     method = "wilcox.test",
+                     size = 5) + 
+      geom_text(data = gdat, aes(y = Y, label = NN), 
+                      angle = 90, hjust = 0, position = position_dodge(width = 1),
+                size = 6, fontface = "bold") + 
+      labs(x = "", y = "Weight (Kg)", title = "") + 
+      facet_wrap(~Gender) +
+      theme_bw() + theme(panel.background = element_rect(fill = NA), 
+                       plot.title = element_text(hjust = 0.5), 
+                       text = element_text(face = 'bold'),
+                       axis.text = element_text(size = 16),
+                       axis.title = element_text(size = 18),
+                       strip.text = element_text(size=18),
+                       legend.text = element_text(size=18),
+                       legend.title = element_text(size=18),
+                       title = element_text(size=20))
+png(file = "Weight_by_age_gender.png",
+        width = 1000, height = 480)
+print(g)
+dev.off()
+
+#Height
+wdat = dat %>% filter(Year == 2016) %>%
+  select(Expo, Gender, Age_grp2, Age_grp1, Height, unique_subject_id) %>% na.omit() %>%
+  mutate(Gender = ifelse(Gender == "F","Female","Male"))
+
+gdat = wdat %>% group_by(Expo, Gender, Age_grp2) %>% 
+      summarise(N = n()) %>% 
+      ungroup() %>% 
+      mutate(NN = paste0("N=", N)) %>% 
+      mutate(Y = -4)
+
+g = ggplot(wdat,
+           aes(x = Age_grp2, y = Height, color = Expo)) + 
+      geom_boxplot() + 
+      geom_point(position = position_jitterdodge(jitter.width = 0.2)) + 
+      scale_color_manual(values = Expo_color, name="Exposure") + 
+      stat_compare_means(
+                     label = "p.format",
+                     method = "wilcox.test",
+                     size = 5) + 
+      geom_text(data = gdat, aes(y = Y, label = NN), 
+                      angle = 90, hjust = 0, position = position_dodge(width = 1),
+                size = 6, fontface = "bold") + 
+      labs(x = "", y = "Height (cm)", title = "") + 
+      facet_wrap(~Gender) +
+      theme_bw() + theme(panel.background = element_rect(fill = NA), 
+                       plot.title = element_text(hjust = 0.5), 
+                       text = element_text(face = 'bold'),
+                       axis.text = element_text(size = 16),
+                       axis.title = element_text(size = 18),
+                       strip.text = element_text(size=18),
+                       legend.text = element_text(size=18),
+                       legend.title = element_text(size=18),
+                       title = element_text(size=20))
+png(file = "Height_by_age_gender.png",
+        width = 1000, height = 480)
+print(g)
+dev.off()
+
+#BMI
+wdat = dat %>% filter(Year == 2016) %>%
+  select(Expo, Gender, Age_grp2, Age_grp1, BMI, unique_subject_id) %>% na.omit() %>%
+  mutate(Gender = ifelse(Gender == "F","Female","Male"))
+
+gdat = wdat %>% group_by(Expo, Gender, Age_grp2) %>% 
+      summarise(N = n()) %>% 
+      ungroup() %>% 
+      mutate(NN = paste0("N=", N)) %>% 
+      mutate(Y = -4)
+
+g = ggplot(wdat,
+           aes(x = Age_grp2, y = BMI, color = Expo)) + 
+      geom_boxplot() + 
+      geom_point(position = position_jitterdodge(jitter.width = 0.2)) + 
+      scale_color_manual(values = Expo_color, name="Exposure") + 
+      stat_compare_means(
+                     label = "p.format",
+                     method = "wilcox.test",
+                     size = 5) + 
+      geom_text(data = gdat, aes(y = Y, label = NN), 
+                      angle = 90, hjust = 0, position = position_dodge(width = 1),
+                size = 6, fontface = "bold") + 
+      labs(x = "", y = "BMI", title = "") + 
+      facet_wrap(~Gender) +
+      theme_bw() + theme(panel.background = element_rect(fill = NA), 
+                       plot.title = element_text(hjust = 0.5), 
+                       text = element_text(face = 'bold'),
+                       axis.text = element_text(size = 16),
+                       axis.title = element_text(size = 18),
+                       strip.text = element_text(size=18),
+                       legend.text = element_text(size=18),
+                       legend.title = element_text(size=18),
+                       title = element_text(size=20))
+png(file = "BMI_by_age_gender.png",
+        width = 1000, height = 480)
+print(g)
+dev.off()
+```
 
 
 
