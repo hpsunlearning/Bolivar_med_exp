@@ -130,6 +130,18 @@ for (v in c("Acetate","Propionate","Isobutyrate","Butyrate", "Isovalerate", "Val
          height = 6, width = 8, units = "in", dpi = 300)
 }
 
+wdat = dat %>% select(Tube_ID,Expo, Age_grp1, Age_grp2, Acetate:Valerate) %>% 
+  pivot_longer(cols = Acetate:Valerate, names_to = "VFA") %>% 
+  mutate(VFA = factor(VFA, levels = c("Acetate","Propionate","Butyrate","Isobutyrate", "Valerate",  "Isovalerate"), ordered = T))
+g = ggplot(wdat, aes(x = Age_grp1, y = value, color = Expo)) +
+  geom_boxplot() + 
+  geom_point(position = position_jitterdodge()) + 
+  scale_color_manual(values = Expo_color, aesthetics = c("colour", "fill"), name = "Exposure") +
+  labs(x="", y = expression(paste(mu, "mol/g feces"))) + 
+  facet_wrap(VFA ~ ., ncol = 3)
+ggsave(filename = paste0("All_VFA_by_age_grp1.png"), g, 
+         height = 6, width = 8, units = "in", dpi = 300)
+
 ```
 
 
